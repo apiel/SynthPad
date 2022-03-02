@@ -133,6 +133,17 @@ public:
     {
         bufferToFill.clearActiveBufferRegion();
 
+        juce::MidiBuffer incomingMidi;
+        // incomingMidi.addEvent
+
+        synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
+                              bufferToFill.startSample, bufferToFill.numSamples); // [5]
+    }
+
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill, juce::MidiBuffer incomingMidi)
+    {
+        bufferToFill.clearActiveBufferRegion();
+
         synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
                               bufferToFill.startSample, bufferToFill.numSamples); // [5]
     }
@@ -228,7 +239,20 @@ public:
 
     void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
     {
-        synthAudioSource.getNextAudioBlock(bufferToFill);
+        // synthAudioSource.getNextAudioBlock(bufferToFill);
+
+        // https://docs.juce.com/master/tutorial_plugin_examples.html
+        juce::MidiBuffer midi;
+        if (amplitude == 0.0f)
+        {
+            midi.addEvent(juce::MidiMessage::noteOff(1, 64), 10);
+        }
+        else
+        {
+            midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8)127), 10);
+        }
+
+        synthAudioSource.getNextAudioBlock(bufferToFill, midi);
     }
 
     void releaseResources() override
