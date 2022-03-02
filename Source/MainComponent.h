@@ -10,6 +10,137 @@
 
 #include <JuceHeader.h>
 
+struct SineWaveSound : public juce::SynthesiserSound
+{
+    SineWaveSound() {}
+
+    bool appliesToNote(int) override { return true; }
+    bool appliesToChannel(int) override { return true; }
+};
+
+//==============================================================================
+struct SineWaveVoice : public juce::SynthesiserVoice
+{
+    SineWaveVoice() {}
+
+    bool canPlaySound(juce::SynthesiserSound *sound) override
+    {
+        return dynamic_cast<SineWaveSound *>(sound) != nullptr;
+    }
+
+    void startNote(int midiNoteNumber, float velocity,
+                   juce::SynthesiserSound *, int /*currentPitchWheelPosition*/) override
+    {
+        currentAngle = 0.0;
+        level = velocity * 0.15;
+        tailOff = 0.0;
+
+        auto cyclesPerSecond = juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber);
+        auto cyclesPerSample = cyclesPerSecond / getSampleRate();
+
+        angleDelta = cyclesPerSample * 2.0 * juce::MathConstants<double>::pi;
+    }
+
+    void stopNote(float /*velocity*/, bool allowTailOff) override
+    {
+        if (allowTailOff)
+        {
+            if (tailOff == 0.0)
+                tailOff = 1.0;
+        }
+        else
+        {
+            clearCurrentNote();
+            angleDelta = 0.0;
+        }
+    }
+
+    void pitchWheelMoved(int) override {}
+    void controllerMoved(int, int) override {}
+
+    void renderNextBlock(juce::AudioSampleBuffer &outputBuffer, int startSample, int numSamples) override
+    {
+        if (angleDelta != 0.0)
+        {
+            if (tailOff > 0.0) // [7]
+            {
+                while (--numSamples >= 0)
+                {
+                    auto currentSample = (float)(std::sin(currentAngle) * level * tailOff);
+
+                    for (auto i = outputBuffer.getNumChannels(); --i >= 0;)
+                        outputBuffer.addSample(i, startSample, currentSample);
+
+                    currentAngle += angleDelta;
+                    ++startSample;
+
+                    tailOff *= 0.99; // [8]
+
+                    if (tailOff <= 0.005)
+                    {
+                        clearCurrentNote(); // [9]
+
+                        angleDelta = 0.0;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                while (--numSamples >= 0) // [6]
+                {
+                    auto currentSample = (float)(std::sin(currentAngle) * level);
+
+                    for (auto i = outputBuffer.getNumChannels(); --i >= 0;)
+                        outputBuffer.addSample(i, startSample, currentSample);
+
+                    currentAngle += angleDelta;
+                    ++startSample;
+                }
+            }
+        }
+    }
+
+private:
+    double currentAngle = 0.0, angleDelta = 0.0, level = 0.0, tailOff = 0.0;
+};
+
+//==============================================================================
+class SynthAudioSource : public juce::AudioSource
+{
+public:
+    SynthAudioSource()
+    {
+        for (auto i = 0; i < 4; ++i) // [1]
+            synth.addVoice(new SineWaveVoice());
+
+        synth.addSound(new SineWaveSound()); // [2]
+    }
+
+    void setUsingSineWaveSound()
+    {
+        synth.clearSounds();
+    }
+
+    void prepareToPlay(int /*samplesPerBlockExpected*/, double sampleRate) override
+    {
+        synth.setCurrentPlaybackSampleRate(sampleRate); // [3]
+    }
+
+    void releaseResources() override {}
+
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
+    {
+        bufferToFill.clearActiveBufferRegion();
+
+        synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
+                              bufferToFill.startSample, bufferToFill.numSamples); // [5]
+    }
+
+private:
+    juce::Synthesiser synth;
+};
+
 //==============================================================================
 /*
     This component lives inside our window, and this is where you should put all
@@ -25,6 +156,16 @@ public:
         // you add any child components.
         setSize(800, 600);
 
+        audioDeviceManager.setCurrentAudioDeviceType("ALSA", false);
+
+        addAndMakeVisible(diagnosticsBox);
+        diagnosticsBox.setMultiLine(true);
+        diagnosticsBox.setReturnKeyStartsNewLine(true);
+        diagnosticsBox.setReadOnly(true);
+        diagnosticsBox.setScrollbarsShown(true);
+        diagnosticsBox.setCaretVisible(false);
+        diagnosticsBox.setPopupMenuEnabled(true);
+
         // Some platforms require permissions to open input channels so request that here
         if (RuntimePermissions::isRequired(RuntimePermissions::recordAudio) && !RuntimePermissions::isGranted(RuntimePermissions::recordAudio))
         {
@@ -37,6 +178,9 @@ public:
             // Specify the number of input and output channels that we want to open
             setAudioChannels(2, 2);
         }
+
+        // printf("yoyoyoyoyo\n");
+        dumpDeviceInfo();
     }
 
     ~MainComponent()
@@ -46,35 +190,50 @@ public:
     }
 
     //==============================================================================
-    void prepareToPlay(int samplesPerBlockExpected, double newSampleRate) override
+    // void prepareToPlay(int samplesPerBlockExpected, double newSampleRate) override
+    // {
+    //     sampleRate = newSampleRate;
+    //     expectedSamplesPerBlock = samplesPerBlockExpected;
+    // }
+
+    // void getNextAudioBlock(const AudioSourceChannelInfo &bufferToFill) override
+    // {
+    //     bufferToFill.clearActiveBufferRegion();
+    //     auto originalPhase = phase;
+
+    //     for (auto chan = 0; chan < bufferToFill.buffer->getNumChannels(); ++chan)
+    //     {
+    //         phase = originalPhase;
+
+    //         auto *channelData = bufferToFill.buffer->getWritePointer(chan, bufferToFill.startSample);
+
+    //         for (auto i = 0; i < bufferToFill.numSamples; ++i)
+    //         {
+    //             channelData[i] = amplitude * std::sin(phase);
+
+    //             // increment the phase step for the next sample
+    //             phase = std::fmod(phase + phaseDelta, MathConstants<float>::twoPi);
+    //         }
+    //     }
+    // }
+
+    // void releaseResources() override
+    // {
+    // }
+
+    void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override
     {
-        sampleRate = newSampleRate;
-        expectedSamplesPerBlock = samplesPerBlockExpected;
+        synthAudioSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
     }
 
-    void getNextAudioBlock(const AudioSourceChannelInfo &bufferToFill) override
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
     {
-        bufferToFill.clearActiveBufferRegion();
-        auto originalPhase = phase;
-
-        for (auto chan = 0; chan < bufferToFill.buffer->getNumChannels(); ++chan)
-        {
-            phase = originalPhase;
-
-            auto *channelData = bufferToFill.buffer->getWritePointer(chan, bufferToFill.startSample);
-
-            for (auto i = 0; i < bufferToFill.numSamples; ++i)
-            {
-                channelData[i] = amplitude * std::sin(phase);
-
-                // increment the phase step for the next sample
-                phase = std::fmod(phase + phaseDelta, MathConstants<float>::twoPi);
-            }
-        }
+        synthAudioSource.getNextAudioBlock(bufferToFill);
     }
 
     void releaseResources() override
     {
+        synthAudioSource.releaseResources();
     }
 
     //==============================================================================
@@ -96,6 +255,7 @@ public:
 
     void resized() override
     {
+        diagnosticsBox.setBounds(10, 10, getWidth() / 3, 100);
     }
 
     void mouseDown(const MouseEvent &e) override
@@ -121,9 +281,43 @@ public:
         repaint();
     }
 
+    void logMessage(const String &m)
+    {
+        diagnosticsBox.moveCaretToEnd();
+        diagnosticsBox.insertTextAtCaret(m + newLine);
+    }
+
+    void dumpDeviceInfo()
+    {
+        logMessage("--------------------------------------");
+        logMessage("Current audio device type: " + (audioDeviceManager.getCurrentDeviceTypeObject() != nullptr
+                                                        ? audioDeviceManager.getCurrentDeviceTypeObject()->getTypeName()
+                                                        : "<none>"));
+
+        if (AudioIODevice *device = audioDeviceManager.getCurrentAudioDevice())
+        {
+            logMessage("Current audio device: " + device->getName().quoted());
+            logMessage("Sample rate: " + String(device->getCurrentSampleRate()) + " Hz");
+            logMessage("Block size: " + String(device->getCurrentBufferSizeSamples()) + " samples");
+            logMessage("Output Latency: " + String(device->getOutputLatencyInSamples()) + " samples");
+            logMessage("Input Latency: " + String(device->getInputLatencyInSamples()) + " samples");
+            logMessage("Bit depth: " + String(device->getCurrentBitDepth()));
+            logMessage("Input channel names: " + device->getInputChannelNames().joinIntoString(", "));
+            // logMessage("Active input channels: " + getListOfActiveBits(device->getActiveInputChannels()));
+            logMessage("Output channel names: " + device->getOutputChannelNames().joinIntoString(", "));
+            // logMessage("Active output channels: " + getListOfActiveBits(device->getActiveOutputChannels()));
+        }
+        else
+        {
+            logMessage("No audio device open");
+        }
+    }
+
 private:
-    //==============================================================================
-    // Your private member variables go here...
+    AudioDeviceManager audioDeviceManager;
+    TextEditor diagnosticsBox;
+    SynthAudioSource synthAudioSource;
+
     float phase = 0.0f;
     float phaseDelta = 0.0f;
     float frequency = 5000.0f;
