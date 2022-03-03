@@ -109,7 +109,8 @@ private:
 class SynthAudioSource : public juce::AudioSource
 {
 public:
-    SynthAudioSource()
+    SynthAudioSource(juce::MidiKeyboardState &keyState)
+        : keyboardState(keyState)
     {
         for (auto i = 0; i < 4; ++i) // [1]
             synth.addVoice(new SineWaveVoice());
@@ -129,26 +130,39 @@ public:
 
     void releaseResources() override {}
 
+    // void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
+    // {
+    //     bufferToFill.clearActiveBufferRegion();
+
+    //     juce::MidiBuffer incomingMidi;
+    //     // incomingMidi.addEvent
+
+    //     synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
+    //                           bufferToFill.startSample, bufferToFill.numSamples); // [5]
+    // }
+
+    // void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill, juce::MidiBuffer incomingMidi)
+    // {
+    //     bufferToFill.clearActiveBufferRegion();
+
+    //     synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
+    //                           bufferToFill.startSample, bufferToFill.numSamples); // [5]
+    // }
+
     void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
     {
         bufferToFill.clearActiveBufferRegion();
 
         juce::MidiBuffer incomingMidi;
-        // incomingMidi.addEvent
-
-        synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
-                              bufferToFill.startSample, bufferToFill.numSamples); // [5]
-    }
-
-    void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill, juce::MidiBuffer incomingMidi)
-    {
-        bufferToFill.clearActiveBufferRegion();
+        keyboardState.processNextMidiBuffer(incomingMidi, bufferToFill.startSample,
+                                            bufferToFill.numSamples, true); // [4]
 
         synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
                               bufferToFill.startSample, bufferToFill.numSamples); // [5]
     }
 
 private:
+    juce::MidiKeyboardState &keyboardState;
     juce::Synthesiser synth;
 };
 
@@ -161,7 +175,7 @@ class MainComponent : public AudioAppComponent
 {
 public:
     //==============================================================================
-    MainComponent()
+    MainComponent() : synthAudioSource(keyboardState)
     {
         // Make sure you set the size of the component after
         // you add any child components.
@@ -189,9 +203,6 @@ public:
             // Specify the number of input and output channels that we want to open
             setAudioChannels(2, 2);
         }
-
-        // printf("yoyoyoyoyo\n");
-        dumpDeviceInfo();
     }
 
     ~MainComponent()
@@ -200,59 +211,32 @@ public:
         shutdownAudio();
     }
 
-    //==============================================================================
-    // void prepareToPlay(int samplesPerBlockExpected, double newSampleRate) override
-    // {
-    //     sampleRate = newSampleRate;
-    //     expectedSamplesPerBlock = samplesPerBlockExpected;
-    // }
-
-    // void getNextAudioBlock(const AudioSourceChannelInfo &bufferToFill) override
-    // {
-    //     bufferToFill.clearActiveBufferRegion();
-    //     auto originalPhase = phase;
-
-    //     for (auto chan = 0; chan < bufferToFill.buffer->getNumChannels(); ++chan)
-    //     {
-    //         phase = originalPhase;
-
-    //         auto *channelData = bufferToFill.buffer->getWritePointer(chan, bufferToFill.startSample);
-
-    //         for (auto i = 0; i < bufferToFill.numSamples; ++i)
-    //         {
-    //             channelData[i] = amplitude * std::sin(phase);
-
-    //             // increment the phase step for the next sample
-    //             phase = std::fmod(phase + phaseDelta, MathConstants<float>::twoPi);
-    //         }
-    //     }
-    // }
-
-    // void releaseResources() override
-    // {
-    // }
-
     void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override
     {
         synthAudioSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
     }
 
+    // void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
+    // {
+    //     // synthAudioSource.getNextAudioBlock(bufferToFill);
+
+    //     // https://docs.juce.com/master/tutorial_plugin_examples.html
+    //     juce::MidiBuffer midi;
+    //     if (amplitude == 0.0f)
+    //     {
+    //         midi.addEvent(juce::MidiMessage::noteOff(1, 64), 10);
+    //     }
+    //     else
+    //     {
+    //         midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8)127), 10);
+    //     }
+
+    //     synthAudioSource.getNextAudioBlock(bufferToFill, midi);
+    // }
+
     void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
     {
-        // synthAudioSource.getNextAudioBlock(bufferToFill);
-
-        // https://docs.juce.com/master/tutorial_plugin_examples.html
-        juce::MidiBuffer midi;
-        if (amplitude == 0.0f)
-        {
-            midi.addEvent(juce::MidiMessage::noteOff(1, 64), 10);
-        }
-        else
-        {
-            midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8)127), 10);
-        }
-
-        synthAudioSource.getNextAudioBlock(bufferToFill, midi);
+        synthAudioSource.getNextAudioBlock(bufferToFill);
     }
 
     void releaseResources() override
@@ -284,24 +268,19 @@ public:
 
     void mouseDown(const MouseEvent &e) override
     {
+        keyboardState.noteOn(1, 64, 100);
         mouseDrag(e);
     }
 
     void mouseDrag(const MouseEvent &e) override
     {
         lastMousePosition = e.position;
-
-        frequency = (float)(getHeight() - e.y) * 10.0f;
-        amplitude = jmin(0.9f, 0.2f * e.position.x / (float)getWidth());
-
-        phaseDelta = (float)(MathConstants<double>::twoPi * frequency / sampleRate);
-
         repaint();
     }
 
     void mouseUp(const MouseEvent &) override
     {
-        amplitude = 0.0f;
+        keyboardState.noteOff(1, 64, 0);
         repaint();
     }
 
@@ -311,44 +290,12 @@ public:
         diagnosticsBox.insertTextAtCaret(m + newLine);
     }
 
-    void dumpDeviceInfo()
-    {
-        logMessage("--------------------------------------");
-        logMessage("Current audio device type: " + (audioDeviceManager.getCurrentDeviceTypeObject() != nullptr
-                                                        ? audioDeviceManager.getCurrentDeviceTypeObject()->getTypeName()
-                                                        : "<none>"));
-
-        if (AudioIODevice *device = audioDeviceManager.getCurrentAudioDevice())
-        {
-            logMessage("Current audio device: " + device->getName().quoted());
-            logMessage("Sample rate: " + String(device->getCurrentSampleRate()) + " Hz");
-            logMessage("Block size: " + String(device->getCurrentBufferSizeSamples()) + " samples");
-            logMessage("Output Latency: " + String(device->getOutputLatencyInSamples()) + " samples");
-            logMessage("Input Latency: " + String(device->getInputLatencyInSamples()) + " samples");
-            logMessage("Bit depth: " + String(device->getCurrentBitDepth()));
-            logMessage("Input channel names: " + device->getInputChannelNames().joinIntoString(", "));
-            // logMessage("Active input channels: " + getListOfActiveBits(device->getActiveInputChannels()));
-            logMessage("Output channel names: " + device->getOutputChannelNames().joinIntoString(", "));
-            // logMessage("Active output channels: " + getListOfActiveBits(device->getActiveOutputChannels()));
-        }
-        else
-        {
-            logMessage("No audio device open");
-        }
-    }
-
 private:
     AudioDeviceManager audioDeviceManager;
     TextEditor diagnosticsBox;
     SynthAudioSource synthAudioSource;
+    juce::MidiKeyboardState keyboardState;
 
-    float phase = 0.0f;
-    float phaseDelta = 0.0f;
-    float frequency = 5000.0f;
-    float amplitude = 0.2f;
-
-    double sampleRate = 0.0;
-    int expectedSamplesPerBlock = 0;
     Point<float> lastMousePosition;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
