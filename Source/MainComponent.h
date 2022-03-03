@@ -130,25 +130,6 @@ public:
 
     void releaseResources() override {}
 
-    // void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
-    // {
-    //     bufferToFill.clearActiveBufferRegion();
-
-    //     juce::MidiBuffer incomingMidi;
-    //     // incomingMidi.addEvent
-
-    //     synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
-    //                           bufferToFill.startSample, bufferToFill.numSamples); // [5]
-    // }
-
-    // void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill, juce::MidiBuffer incomingMidi)
-    // {
-    //     bufferToFill.clearActiveBufferRegion();
-
-    //     synth.renderNextBlock(*bufferToFill.buffer, incomingMidi,
-    //                           bufferToFill.startSample, bufferToFill.numSamples); // [5]
-    // }
-
     void getNextAudioBlock(const juce::AudioSourceChannelInfo &bufferToFill) override
     {
         bufferToFill.clearActiveBufferRegion();
@@ -247,12 +228,25 @@ public:
     //==============================================================================
     void paint(Graphics &g) override
     {
+        int width = getWidth();
+        int height = getHeight();
+
         // (Our component is opaque, so we must completely fill the background with a solid colour)
         g.fillAll(getLookAndFeel().findColour(ResizableWindow::backgroundColourId));
 
         g.setColour(juce::Colours::orange);
         auto headerHeight = 150.0f;
-        g.drawLine(0, headerHeight, getWidth(), headerHeight, 2);
+        g.drawLine(0, headerHeight, width, headerHeight, 2);
+
+        g.setColour(juce::Colours::grey);
+        // for (int x = 0; x < width; x += noteSize)
+        // {
+        //     g.drawLine(x, headerHeight, x, height, 1);
+        // }
+        // for (int y = headerHeight; y < height; y += noteSize)
+        // {
+        //     g.drawLine(0, y, width, y, 1);
+        // }
 
         int radius = 10;
         g.setColour(Colours::lightgreen);
@@ -268,19 +262,29 @@ public:
 
     void mouseDown(const MouseEvent &e) override
     {
-        keyboardState.noteOn(1, 64, 100);
         mouseDrag(e);
     }
 
     void mouseDrag(const MouseEvent &e) override
     {
+        int width = getWidth();
+        int height = getHeight();
+        int note = ((e.position.getX() / noteSize) * (e.position.getY() / noteSize));
+        note = note % 128;
+        // printf("note: %d\n", note);
+        if (note != lastNote)
+        {
+            keyboardState.noteOff(1, lastNote, 0);
+            keyboardState.noteOn(1, note, 0.8f);
+            lastNote = note;
+        }
         lastMousePosition = e.position;
         repaint();
     }
 
     void mouseUp(const MouseEvent &) override
     {
-        keyboardState.noteOff(1, 64, 0);
+        keyboardState.noteOff(1, lastNote, 0);
         repaint();
     }
 
@@ -297,6 +301,8 @@ private:
     juce::MidiKeyboardState keyboardState;
 
     Point<float> lastMousePosition;
+    int lastNote = 255;
+    const int noteSize = 50;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
