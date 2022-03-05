@@ -235,7 +235,6 @@ public:
         g.fillAll(getLookAndFeel().findColour(ResizableWindow::backgroundColourId));
 
         g.setColour(juce::Colours::orange);
-        auto headerHeight = 150.0f;
         g.drawLine(0, headerHeight, width, headerHeight, 2);
 
         g.setColour(juce::Colours::grey);
@@ -269,13 +268,17 @@ public:
     {
         int width = getWidth();
         int height = getHeight();
-        int note = ((e.position.getX() / noteSize) * (e.position.getY() / noteSize));
+        int x = 1 + (e.position.getX() / noteSize);
+        int y = 1 + ((e.position.getY() - headerHeight) / noteSize);
+        int note = x * y;
+        // printf("calc %d\n", note);
         note = note % 128;
         // printf("note: %d\n", note);
         if (note != lastNote)
         {
             keyboardState.noteOff(1, lastNote, 0);
             keyboardState.noteOn(1, note, 0.8f);
+            // printf("node %d\n", note);
             lastNote = note;
         }
         lastMousePosition = e.position;
@@ -303,6 +306,7 @@ private:
     Point<float> lastMousePosition;
     int lastNote = 255;
     const int noteSize = 50;
+    const float headerHeight = 150.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
